@@ -2,6 +2,7 @@
 MIT License
 
 Copyright (c) 2017 Robert Herlihy
+Copyright (c) 2025 Ashley Hawkins
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +22,43 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ]]
+
+-- Time limit in seconds, to avoid untrusted input causing a hang via an infinite loop
+local TIME_LIMIT = 0.2
+
+local function restrict_execution(chunk)
+  -- apply an empty environment, so the untrusted input can't access or mess with the real environment
+  setfenv(chunk, {})
+
+  return function()
+    local start = os.clock()
+
+    local original_hook = {debug.gethook()}
+
+    -- set a hook to check whether the time limit has been exceeded
+    debug.sethook(function()
+      local elapsed = os.clock() - start
+      if elapsed > TIME_LIMIT then
+        error("Time limit exceeded.")
+      end
+    end, "", 1000)
+
+    -- disable jit so the debug hook actually has a chance to be called
+    local original_jit_status = jit and jit.status()
+
+    if jit then jit.off() end
+
+    -- run the chunk
+    local result = {chunk()}
+
+    -- re-enable jit if it was originally enabled
+    if jit and original_jit_status then jit.on() end
+
+    -- restore original debug hook
+    debug.sethook(unpack(original_hook))
+    return unpack(result)
+  end
+end
 
 local saveData = {}
 local finalStringTemp = "return { \r\n"
@@ -85,7 +123,7 @@ end
 
 function saveData.load(saveFile)
   local chunk, fileError = love.filesystem.load(saveFile)
-  return chunk(), fileError
+  return restrict_execution(chunk)(), fileError
 end
 
 function saveData.save(data, saveFile)
