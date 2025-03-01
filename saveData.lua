@@ -30,6 +30,9 @@ local function restrict_execution(chunk)
   -- apply an empty environment, so the untrusted input can't access or mess with the real environment
   setfenv(chunk, {})
 
+  -- disable jit so the debug hook actually has a chance to be called
+  if jit then jit.off(chunk, true) end
+
   return function()
     local start = os.clock()
 
@@ -43,19 +46,18 @@ local function restrict_execution(chunk)
       end
     end, "", 1000)
 
-    -- disable jit so the debug hook actually has a chance to be called
-    local original_jit_status = jit and jit.status()
-
-    if jit then jit.off() end
-
     -- run the chunk
-    local result = {chunk()}
-
-    -- re-enable jit if it was originally enabled
-    if jit and original_jit_status then jit.on() end
+    local result = {pcall(chunk)}
 
     -- restore original debug hook
     debug.sethook(unpack(original_hook))
+
+    local success = table.remove(result, 1)
+
+    if not success then
+      error(unpack(result))
+    end
+
     return unpack(result)
   end
 end
